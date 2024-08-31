@@ -3,10 +3,10 @@ name: Rapfi
 on:
   push:
     branches:
-      - master
+      - master-jw
   pull_request:
     branches:
-      - master
+      - master-jw
 
 jobs:
   Rapfi:
