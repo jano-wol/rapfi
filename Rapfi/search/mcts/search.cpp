@@ -37,6 +37,45 @@ struct SearchStack
     Pattern4 moveP4[2];
 };
 
+// forward declaration
+template <Rule Rule>
+Value vcfsearch(Board &board, SearchStack *ss, int ply, Value alpha, Value beta, Depth depth);
+template <Rule Rule>
+Value vcfdefend(Board &board, SearchStack *ss, int ply, Value alpha, Value beta, Depth depth);
+
+Value vcf(Rule rule, Board &board, int ply)
+{
+    Value alpha = -VALUE_EVAL_MAX;
+    Value beta  = VALUE_EVAL_MAX;
+    Depth depth = 0;
+
+    SearchStack  stack[MAX_MOVES + 4];
+    SearchStack *ss = stack - ply + 4;
+    for (int i : {1, 2, 3, 4}) {
+        ss[ply - i].moveP4[BLACK] = NONE;
+        ss[ply - i].moveP4[WHITE] = NONE;
+    }
+
+    if (board.p4Count(~board.sideToMove(), A_FIVE)) {
+        switch (rule) {
+        case FREESTYLE: return vcfdefend<FREESTYLE>(board, ss, ply, alpha, beta, depth);
+        case STANDARD: return vcfdefend<STANDARD>(board, ss, ply, alpha, beta, depth);
+        case RENJU: return vcfdefend<RENJU>(board, ss, ply, alpha, beta, depth);
+        default: break;
+        }
+    }
+    else {
+        switch (rule) {
+        case FREESTYLE: return vcfsearch<FREESTYLE>(board, ss, ply, alpha, beta, depth);
+        case STANDARD: return vcfsearch<STANDARD>(board, ss, ply, alpha, beta, depth);
+        case RENJU: return vcfsearch<RENJU>(board, ss, ply, alpha, beta, depth);
+        default: break;
+        }
+    }
+
+    return VALUE_ZERO;
+}
+
 template <Rule Rule>
 Value vcfsearch(Board &board, SearchStack *ss, int ply, Value alpha, Value beta, Depth depth)
 {
@@ -44,7 +83,7 @@ Value vcfsearch(Board &board, SearchStack *ss, int ply, Value alpha, Value beta,
     SearchThread        *thisThread = board.thisThread();
     const SearchOptions &options    = thisThread->options();
     int                  moveCount  = 0;
-    Value                bestValue  = -VALUE_INFINITE, value;
+    Value                bestValue  = -VALUE_INFINITE;
     Value                oldAlpha   = alpha;  // Flag BOUND_EXACT when value above alpha in PVNode
     Pos                  bestMove   = Pos::NONE;
     if (ply > thisThread->selDepth)
@@ -110,7 +149,7 @@ Value vcfsearch(Board &board, SearchStack *ss, int ply, Value alpha, Value beta,
         board.move<Rule, Board::MoveType::NO_EVAL>(move);
 
         // Call defence-side vcf search
-        value = -vcfdefend<Rule>(board, ss, ply + 1, -beta, -alpha, depth - 1);
+        Value value = -vcfdefend<Rule>(board, ss, ply + 1, -beta, -alpha, depth - 1);
 
         board.undo<Rule, Board::MoveType::NO_EVAL>();
 
@@ -187,39 +226,6 @@ Value vcfdefend(Board &board, SearchStack *ss, int ply, Value alpha, Value beta,
 
     assert(value > -VALUE_INFINITE && value < VALUE_INFINITE);
     return value;
-}
-
-Value vcf(Rule rule, Board &board, int ply)
-{
-    Value alpha = -VALUE_EVAL_MAX;
-    Value beta  = VALUE_EVAL_MAX;
-    Depth depth = 0;
-
-    SearchStack  stack[MAX_MOVES + 4];
-    SearchStack *ss = stack - ply + 4;
-    for (int i : {1, 2, 3, 4}) {
-        ss[ply - i].moveP4[BLACK] = NONE;
-        ss[ply - i].moveP4[WHITE] = NONE;
-    }
-
-    if (board.p4Count(~board.sideToMove(), A_FIVE)) {
-        switch (rule) {
-        case FREESTYLE: return vcfdefend<FREESTYLE>(board, ss, ply, alpha, beta, depth);
-        case STANDARD: return vcfdefend<STANDARD>(board, ss, ply, alpha, beta, depth);
-        case RENJU: return vcfdefend<RENJU>(board, ss, ply, alpha, beta, depth);
-        default: break;
-        }
-    }
-    else {
-        switch (rule) {
-        case FREESTYLE: return vcfsearch<FREESTYLE>(board, ss, ply, alpha, beta, depth);
-        case STANDARD: return vcfsearch<STANDARD>(board, ss, ply, alpha, beta, depth);
-        case RENJU: return vcfsearch<RENJU>(board, ss, ply, alpha, beta, depth);
-        default: break;
-        }
-    }
-
-    return VALUE_ZERO;
 }
 
 }  // namespace SimpleVCF

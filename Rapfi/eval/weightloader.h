@@ -54,11 +54,11 @@ struct WeightLoader
 };
 
 /// A weight loader for plain binary Data.
-template <typename WeightType>
-struct PlainBinaryWeightLoader : WeightLoader<WeightType>
+template <typename WeightType_>
+struct PlainBinaryWeightLoader : WeightLoader<WeightType_>
 {
-    using typename WeightLoader<WeightType>::WeightType;
-    using typename WeightLoader<WeightType>::LoadArgs;
+    using typename WeightLoader<WeightType_>::WeightType;
+    using typename WeightLoader<WeightType_>::LoadArgs;
 
     std::unique_ptr<WeightType> load(std::istream &is, LoadArgs args) override
     {
