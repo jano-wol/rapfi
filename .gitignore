@@ -23,6 +23,9 @@ bld/
 # Visual Studio 2015 cache/options directory
 .vs/
 
+# Pycharm cache files
+**/.idea
+
 # Visual C++ cache files
 ipch/
 *.aps
