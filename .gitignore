@@ -26,6 +26,9 @@ bld/
 # Pycharm cache files
 **/.idea
 
+# VScode cache files
+**/.vscode
+
 # Visual C++ cache files
 ipch/
 *.aps
