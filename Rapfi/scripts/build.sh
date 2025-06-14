@@ -6,7 +6,7 @@ cmake --build "${BUILD_FOLDER}" -j 4 -v
 NETWORK_FOLDER="${RAPFI_FOLDER}/../Networks/"
 CONFIG_FOLDER="${NETWORK_FOLDER}/config-example/"
 CLASSICAL_FOLDER="${NETWORK_FOLDER}/classical/"
-MIX9_FOLDER="${NETWORK_FOLDER}/mix9nnue/"
+MIX9_FOLDER="${NETWORK_FOLDER}/mix9svq/"
 
 if [ $? -eq 0 ]; then
     cp ${CLASSICAL_FOLDER}/* "${BUILD_FOLDER}"
