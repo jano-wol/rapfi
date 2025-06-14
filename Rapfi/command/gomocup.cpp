@@ -45,7 +45,7 @@
     #include <mutex>
     #include <thread>
 
-static std::mutex protocol_mutex;
+static std::mutex protocolMutex;
 #endif
 
 using namespace Database;
@@ -128,15 +128,14 @@ void sendActionAndUpdateBoard(ActionType action, Pos bestMove)
 
         options.swapable    = false;
         options.balanceMode = Search::SearchOptions::BALANCE_TWO;
-        Search::Threads.startThinking(*board, options);
-        Search::Threads.waitForIdle();
-
-        Pos move1 = Search::Threads.main()->rootMoves[0].pv[0];
-        Pos move2 = Search::Threads.main()->rootMoves[0].pv[1];
-        std::cout << outputCoordXConvert(move1, board->size()) << ','
-                  << outputCoordYConvert(move1, board->size()) << ' '
-                  << outputCoordXConvert(move2, board->size()) << ','
-                  << outputCoordYConvert(move2, board->size()) << std::endl;
+        Search::Threads.startThinking(*board, options, false, []() {
+            Pos move1 = Search::Threads.main()->rootMoves[0].pv[0];
+            Pos move2 = Search::Threads.main()->rootMoves[0].pv[1];
+            std::cout << outputCoordXConvert(move1, board->size()) << ','
+                      << outputCoordYConvert(move1, board->size()) << ' '
+                      << outputCoordXConvert(move2, board->size()) << ','
+                      << outputCoordYConvert(move2, board->size()) << std::endl;
+        });
     }
 }
 
@@ -154,21 +153,23 @@ void think(Board                             &board,
     if (Config::ReloadConfigEachMove)
         loadConfig();
 
-#ifdef MULTI_THREADING
-    // If threads are pondering, stop them now
-    if (Search::Threads.main()->inPonder)
+    // If threads are pondering, stop them now and wait for them to finish
+    if (Search::Threads.main()->inPonder) {
         Search::Threads.stopThinking();
-
-    Time startTime = now();
-    thinking       = true;
-    Search::Threads.startThinking(board, options);
-
-    std::thread waitThread([&, startTime]() {
         Search::Threads.waitForIdle();
+    }
 
-        std::lock_guard<std::mutex> lock(protocol_mutex);
-        sendActionAndUpdateBoard(Search::Threads.main()->resultAction,
-                                 Search::Threads.main()->bestMove);
+    thinking = true;
+    Search::Threads.startThinking(board, options, false, [&, startTime = now()]() {
+        {
+#ifdef MULTI_THREADING
+            std::lock_guard<std::mutex> lock(protocolMutex);
+#endif
+
+            sendActionAndUpdateBoard(Search::Threads.main()->resultAction,
+                                     Search::Threads.main()->bestMove);
+            thinking = false;
+        }
 
         // Subtract used match time
         Time usedTime = now() - startTime;
@@ -176,27 +177,9 @@ void think(Board                             &board,
             options.timeLeft = std::max(options.timeLeft - usedTime, (Time)0);
 
         // Start pondering search if needed
-        if (Search::Threads.main()->startPonderAfterThinking) {
+        if (Search::Threads.main()->startPonderAfterThinking)
             Search::Threads.startThinking(board, options, true);
-        }
-
-        thinking = false;
     });
-    waitThread.detach();
-#else
-    Time startTime = now();
-    thinking       = true;
-    Search::Threads.startThinking(board, options);
-
-    // Subtract used match time
-    Time usedTime = now() - startTime;
-    if (options.timeLimit && options.matchTime > 0)
-        options.timeLeft = std::max(options.timeLeft - usedTime, (Time)0);
-
-    sendActionAndUpdateBoard(Search::Threads.main()->resultAction,
-                             Search::Threads.main()->bestMove);
-    thinking = false;
-#endif
 }
 
 void setGUIMode()
@@ -280,7 +263,8 @@ void getOption()
 
         // Resize TT if memory reserved is different for this rule.
         if (Config::MemoryReservedMB[prevRule] != Config::MemoryReservedMB[options.rule.rule]) {
-            size_t maxMemSizeKB  = Search::Threads.searcher()->getMemoryLimit();
+            size_t maxMemSizeKB = Search::Threads.searcher()->getMemoryLimit()
+                                  + Config::MemoryReservedMB[prevRule] * 1024;
             size_t memReservedKB = Config::MemoryReservedMB[options.rule.rule] * 1024;
             size_t memLimitKB    = maxMemSizeKB <= memReservedKB ? 1 : maxMemSizeKB - memReservedKB;
             Search::Threads.searcher()->setMemoryLimit(memLimitKB);
@@ -1261,6 +1245,7 @@ bool runProtocol()
     std::cin >> cmd;
 
     // Stop the protocol loop when reaching EOF
+    // We do not stop thinking here, but let the outer loop to wait for its finish.
     if (std::cin.eof())
         return true;
 
@@ -1275,13 +1260,12 @@ bool runProtocol()
     };
 
     // clang-format off
-    if (cmd == "END")          { Search::Threads.stopThinking(); return true; }
-    else if (cmd == "STOP")    { Search::Threads.stopThinking(); return false; }
-    else if (cmd == "YXSTOP")  { Search::Threads.stopThinking(); return false; }
-    else if (thinking)         return false;
+    if (cmd == "END")                          return Search::Threads.stopThinking(), true;
+    else if (cmd == "STOP" || cmd == "YXSTOP") return Search::Threads.stopThinking(), false;
+    else if (thinking)                         return false;
 
 #ifdef MULTI_THREADING
-    std::lock_guard<std::mutex> lock(protocol_mutex);
+    std::lock_guard<std::mutex> lock(protocolMutex);
 #endif
 
     // Stop pondering first for commands that may modify the board state
@@ -1352,14 +1336,14 @@ bool runProtocol()
 
     #ifdef MULTI_THREADING
         #include <emscripten/atomic.h>
-static uint32_t loop_ready = 0;  // a dummy variable for atomic wait
+static uint32_t loop_ready = 0;  // count variable for atomic wait
     #endif
 
 /// Entry point of one gomocup protocol iter for WASM build
 extern "C" void gomocupLoopOnce()
 {
     #ifdef MULTI_THREADING
-    emscripten_atomic_store_u32(&loop_ready, 1);
+    emscripten_atomic_add_u32(&loop_ready, 1);
     emscripten_atomic_notify(&loop_ready, 1);
     #else
     if (Command::GomocupProtocol::runProtocol())
@@ -1378,11 +1362,12 @@ void Command::gomocupLoop()
     for (;;) {
 #ifdef __EMSCRIPTEN__
     #ifdef MULTI_THREADING
-        emscripten_atomic_wait_u32(&loop_ready, 0, -1);
-        emscripten_atomic_store_u32(&loop_ready, 0);
+        while (emscripten_atomic_load_u32(&loop_ready) == 0)
+            emscripten_atomic_wait_u32(&loop_ready, 0, -1);
+        emscripten_atomic_sub_u32(&loop_ready, 1);
     #else
-        // We do not run infinite loop in wasm build, instead we manually call
-        // gomocupLoopOnce() for each command to avoid hanging the main thread.
+        // We do not run infinite loop in single thread build, instead we manually
+        // call gomocupLoopOnce() for each command to avoid hanging the main thread.
         return;
     #endif
 #endif

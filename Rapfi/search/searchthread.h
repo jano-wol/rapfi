@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "../core/platform.h"
 #include "../database/dbclient.h"
 #include "../database/dbstorage.h"
 #include "../eval/evaluator.h"
@@ -59,7 +60,8 @@ public:
 private:
     friend struct MainSearchThread;
     friend class ThreadPool;
-    bool running, exit;
+    Numa::NumaNodeId numaId;
+    bool             running, exit;
 
 #ifdef MULTI_THREADING
     std::function<void(SearchThread &)> taskFunc;
@@ -113,8 +115,12 @@ public:
     std::unordered_map<Balance2Move, size_t, Balance2Move::Hash> balance2Moves;
 
     // Common thread-related statistics
-    std::atomic<uint64_t> numNodes;  /// Nodes count searched by this thread
-    int                   selDepth;  /// Maximum depth reached by this thread
+    // ----------------------------------------------------
+
+    /// Nodes count searched by this thread
+    std::atomic<uint64_t> numNodes;
+    /// Maximum depth reached by this thread
+    int selDepth;
 };
 
 /// MainSearchThread class is the master thread in the Lazy SMP algorithm.
@@ -132,12 +138,10 @@ struct MainSearchThread : public SearchThread
     void checkExit(uint32_t elapsedCalls = 1);
     /// Mark pondering available for the last finished searching.
     void markPonderingAvailable();
-    /// Start the searching function of all threads (including main thread itself).
-    /// This function will block until the main thread finishs its search, then it
-    /// will set terminating to true and wait for all other threads to finish.
-    void startSearchingAndWait();
     /// Start a custom task with all threads and wait for them to finish.
-    void runCustomTaskAndWait(std::function<void(SearchThread &)> task);
+    /// @param task The custom task to run in each thread.
+    /// @param includeSelf If true, the main thread will also run the task.
+    void runCustomTaskAndWait(std::function<void(SearchThread &)> task, bool includeSelf);
 
     /// Current search options
     SearchOptions  searchOptions;
@@ -147,8 +151,6 @@ struct MainSearchThread : public SearchThread
     ActionType resultAction;
     /// Searched best move result
     Pos bestMove;
-    /// Previous searched best move of last ply (used in selfplay)
-    Pos previousPlyBestMove;
     /// Calls count before exit condition check
     uint32_t callsCnt;
     /// Should we start pondering after finishing this move?
@@ -164,7 +166,10 @@ struct MainSearchThread : public SearchThread
 class ThreadPool : public std::vector<std::unique_ptr<SearchThread>>
 {
 public:
-    using EvaluatorMaker = std::unique_ptr<Evaluation::Evaluator>(int boardSize, Rule rule);
+    /// Type of the function that creates an evaluator instance.
+    using EvaluatorMaker = std::unique_ptr<Evaluation::Evaluator>(int              boardSize,
+                                                                  Rule             rule,
+                                                                  Numa::NumaNodeId numaId);
 
 private:
     friend struct SearchThread;
@@ -185,12 +190,14 @@ private:
     }
 
 public:
-    /// Wait for all search threads to finish their current works.
-    /// @param includingMainThread Whether to wait for main thread. Must be
-    /// set to false when called inside the main thread to avoid deadlock.
-    void waitForIdle(bool includingMainThread = true);
+    /// Wait for (other) search threads to finish their current works.
+    /// @note When called inside the main thread, it will only wait for other
+    ///     threads to finish their current works, excluding the main thread itself.
+    void waitForIdle();
     /// Destroy all old threads and creates requested amount of threads.
+    /// @param numThreads The number of threads to create.
     /// @note New threads will immediately go to sleep in threadLoop().
+    ///     This must never be called in the worker threads.
     void setNumThreads(size_t numThreads);
     /// Setup current searcher to a search algorithm.
     /// @param searcher The unique ptr to a search, must not be nullptr.
@@ -205,8 +212,12 @@ public:
     /// @param board The position to start searching.
     /// @param options Options of this search.
     /// @param inPonder If true, it is considered as pondering mode. No message will be shown.
+    /// @param onStop Function to be called (in main thread) when search is finished or interrupted.
     /// @note This is a non-blocking function. It returns immediately after starting all threads.
-    void startThinking(const Board &board, const SearchOptions &options, bool inPonder = false);
+    void startThinking(const Board          &board,
+                       const SearchOptions  &options,
+                       bool                  inPonder = false,
+                       std::function<void()> onStop   = nullptr);
     /// Notify all threads to stop thinking immediately.
     void stopThinking() { terminate.store(true, std::memory_order_relaxed); }
     /// Clear all threads state, searcher state and thread pool state for a new game.

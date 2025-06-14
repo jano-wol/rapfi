@@ -21,7 +21,7 @@
 #include <sstream>
 
 #define RAPFI_MAJOR_VER    0
-#define RAPFI_MINOR_VER    42
+#define RAPFI_MINOR_VER    43
 #define RAPFI_REVISION_VER 01
 
 #define MACRO_STR(s)         #s
@@ -85,6 +85,11 @@ std::string getBuildInfo()
     ss << " NEON_DOTPROD";
 #elif defined(USE_NEON)
     ss << " NEON";
+#endif
+#if defined(USE_WASM_SIMD_RELAXED)
+    ss << " WASM_SIMD_RELAXED";
+#elif defined(USE_WASM_SIMD)
+    ss << " WASM_SIMD";
 #endif
 
 #if !defined(MULTI_THREADING)
