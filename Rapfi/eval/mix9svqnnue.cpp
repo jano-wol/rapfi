@@ -164,11 +164,12 @@ using Convert = simd::detail::VecCvt<FT, TT, IT>;
 using I8LS    = simd::detail::VecLoadStore<int8_t, Alignment, IT>;
 using I16LS   = simd::detail::VecLoadStore<int16_t, Alignment, IT>;
 using I32LS   = simd::detail::VecLoadStore<int32_t, Alignment, IT>;
-using F32LS   = simd::detail::VecLoadStore<float, Alignment, IT>;
-using I8Op    = simd::detail::VecOp<int8_t, IT>;
-using I16Op   = simd::detail::VecOp<int16_t, IT>;
-using I32Op   = simd::detail::VecOp<int32_t, IT>;
-using F32Op   = simd::detail::VecOp<float, IT>;
+// We can only use 16 here due to a bug in the weight layout
+using F32LS = simd::detail::VecLoadStore<float, 16, IT>;
+using I8Op  = simd::detail::VecOp<int8_t, IT>;
+using I16Op = simd::detail::VecOp<int16_t, IT>;
+using I32Op = simd::detail::VecOp<int32_t, IT>;
+using F32Op = simd::detail::VecOp<float, IT>;
 
 template <int OutSize, int InSize>
 inline void
@@ -822,7 +823,9 @@ Evaluator::Evaluator(int                   boardSize,
     if (boardSize > 22)
         throw UnsupportedBoardSizeError(boardSize);
 
-    loader.setHeaderValidator([](StandardHeader header, auto &args) -> bool {
+    Time startTime     = now();
+    bool printLoadInfo = false;
+    loader.setHeaderValidator([&](StandardHeader header, auto &args) -> bool {
         constexpr uint32_t ArchHash = ArchHashBase
                                       ^ (((FeatDWConvDim / 8) << 20) | ((ValueDim / 8) << 14)
                                          | ((PolicyDim / 8) << 8) | (FeatureDim / 8));
@@ -835,8 +838,10 @@ Evaluator::Evaluator(int                   boardSize,
         if (!contains(header.supportedBoardSizes, args.boardSize))
             throw UnsupportedBoardSizeError(args.boardSize);
 
-        if (Config::MessageMode != MsgMode::NONE)
+        if (Config::MessageMode != MsgMode::NONE) {
             MESSAGEL("mix9svq nnue: load weight from " << pathToConsoleString(args.weightPath));
+            printLoadInfo = true;
+        }
         return true;
     });
 
@@ -852,6 +857,9 @@ Evaluator::Evaluator(int                   boardSize,
             throw std::runtime_error("failed to load nnue weight from "
                                      + pathToConsoleString(weightPath));
     }
+
+    if (printLoadInfo)
+        MESSAGEL("mix9svq nnue: weight loaded in " << timeText(now() - startTime));
 
     accumulator[BLACK] = std::make_unique<Accumulator>(boardSize);
     accumulator[WHITE] = std::make_unique<Accumulator>(boardSize);
